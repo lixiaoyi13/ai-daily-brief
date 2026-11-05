@@ -605,6 +605,7 @@ def main():
             print(text)
             print("-" * 70)
             return
+        log("本次推送内容：\n" + text)   # 写进 Actions 日志，方便事后核对
         dispatch(subject, text, html_body, args.channel)
         log("完成")
     except Exception as e:  # noqa: BLE001
