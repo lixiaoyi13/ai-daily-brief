@@ -32,8 +32,8 @@ jobs:
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           DEEPSEEK_MODEL: deepseek-flash
-          # 渠道由仓库变量 CHANNEL 决定：dingtalk / email / feishu / serverchan；没配则用 email
-          CHANNEL: ${{ vars.CHANNEL || 'email' }}
+          # 渠道由仓库变量 CHANNEL 决定：dingtalk / email / feishu / serverchan；没配则默认钉钉
+          CHANNEL: ${{ vars.CHANNEL || 'dingtalk' }}
           DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}
           DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
