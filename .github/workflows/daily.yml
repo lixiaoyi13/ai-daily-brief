@@ -3,13 +3,17 @@ name: ai-daily-brief
 # 时间：UTC 23:50 = 北京时间 07:50（中国无夏令时，全年固定）
 # 为什么不在 00:00 UTC 整点跑：GitHub 官方文档明确说整点是调度高峰，容易排队延迟；
 # 提前 10 分钟触发，脚本内部再 sleep 到 08:00 整发信，可吸收几分钟的排队抖动。
+#
+# 第二班车 UTC 00:20 = 北京 08:20：GitHub 的 schedule 有被丢弃/长时间延迟的已知风险，
+# 两班车互为兜底；脚本用 digest_state.json 去重，同一天只会真正推送一次。
 on:
   schedule:
-    - cron: '50 23 * * *'   # UTC 23:50 = 北京 07:50
+    - cron: '50 23 * * *'   # 北京 07:50 → 08:00 发送（主）
+    - cron: '20 0 * * *'    # 北京 08:20（兜底，已发过则跳过）
   workflow_dispatch: {}      # 手动测试用；手动触发时跳过等待、立即推送
 
 permissions:
-  contents: read
+  contents: write            # 需要写回 digest_state.json 做当日去重
 
 concurrency:
   group: ai-daily-brief
@@ -48,6 +52,16 @@ jobs:
             python3 ai_daily_brief.py --at 08:00
           fi
 
+      - name: 记录今日已发（供第二班车去重）
+        if: always()
+        run: |
+          if [ -f digest_state.json ] && [ -n "$(git status --porcelain digest_state.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add digest_state.json
+            git commit -m "chore: 记录发送状态 [skip ci]"
+            git push || echo "状态提交失败（不影响已发出的推送）"
+          fi
+
       # 失败时 Actions 页面标红，GitHub 默认会给工作流维护者发失败通知邮件；
       # 脚本内部也会往同一推送渠道发一条 ❌ 通知（双保险）。
-      # 若整份任务被 GitHub 丢掉（极端情况），08:15 还没收到邮件就去 Actions 页面手动重跑。

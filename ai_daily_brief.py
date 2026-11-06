@@ -54,6 +54,7 @@ MAX_ITEMS = 5          # 每日条数上限
 MIN_SCORE = 4          # 重大事件门槛（0-5）
 PER_CATEGORY = 2       # 同一类别每天最多几条
 WINDOW_HOURS = 24      # 时间窗
+STATE_FILE = "digest_state.json"   # 记录「今天是否已推送」，用于第二次定时兜底时去重
 
 # ---------------------------------------------------------------------------
 # 源清单：tier 1 = 官方一手；tier 2 = 一线科技媒体；tier 3 = 聚合/研究（默认关闭）
@@ -118,6 +119,24 @@ WEEK = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
 def today_str():
     now = datetime.now(CST)
     return "%s %s" % (now.strftime("%Y-%m-%d"), WEEK[now.weekday()])
+
+
+def already_sent_today():
+    try:
+        with open(STATE_FILE, encoding="utf-8") as f:
+            return json.load(f).get("last_sent") == today_str()[:10]
+    except Exception:
+        return False
+
+
+def mark_sent():
+    try:
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"last_sent": today_str()[:10],
+                       "sent_at": datetime.now(CST).strftime("%Y-%m-%d %H:%M:%S")},
+                      f, ensure_ascii=False)
+    except Exception as e:  # noqa: BLE001
+        log("写状态文件失败（不影响已发送）：%s" % e)
 
 
 def log(msg):
@@ -542,6 +561,7 @@ def main():
     ap.add_argument("--check-feeds", action="store_true", help="只检查各源是否可用")
     ap.add_argument("--channel", default=os.environ.get("CHANNEL", "console"))
     ap.add_argument("--retries", type=int, default=3, help="生成阶段失败重试次数")
+    ap.add_argument("--force", action="store_true", help="忽略今日去重，强制再发一次")
     args = ap.parse_args()
 
     date_str = today_str()
@@ -563,6 +583,10 @@ def main():
 
     if args.at and not args.no_wait and not args.dry_run:
         wait_until(args.at)
+
+    if not args.dry_run and not args.force and already_sent_today():
+        log("今天(%s)已经推送过，本次跳过（第二次定时兜底去重）" % date_str[:10])
+        return
 
     subject = "AI 日报 · " + date_str
     try:
@@ -607,6 +631,7 @@ def main():
             return
         log("本次推送内容：\n" + text)   # 写进 Actions 日志，方便事后核对
         dispatch(subject, text, html_body, args.channel)
+        mark_sent()
         log("完成")
     except Exception as e:  # noqa: BLE001
         log("运行失败：%s" % e)
