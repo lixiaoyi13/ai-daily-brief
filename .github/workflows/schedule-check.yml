@@ -1,0 +1,14 @@
+name: schedule-check
+# 临时文件：只用来验证「公开仓库下 schedule 事件是否真的会触发」，验证完删除。
+on:
+  schedule:
+    - cron: '0 4 * * *'   # UTC 04:00 = 北京 12:00
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 定时触发验证
+        run: echo "scheduled run OK at $(date -u)"
