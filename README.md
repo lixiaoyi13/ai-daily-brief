@@ -8,6 +8,12 @@
 - 成本：GitHub Actions 免费额度内 ¥0，DeepSeek 约 ¥0.5–1.5/月
 - 依赖：零第三方 Python 包，只用标准库
 
+> ⚠️ **重要前提：仓库必须是 Public**（或账号升级到 GitHub Pro）。
+> 2026 年实测：个人免费账号下的**私有仓库**，`schedule`（cron）事件不会注册——手动 `workflow_dispatch` 正常，
+> 但定时永远不触发，Actions 里也看不到 scheduled 记录。这是 GitHub 未写进文档的限制，
+> 见 [community #201354](https://github.com/orgs/community/discussions/201354)。密钥存在 Actions Secrets 里，
+> 不会随仓库公开。
+
 ---
 
 ## 一、部署（约 20 分钟）
@@ -35,7 +41,7 @@
 仓库 → Settings → Variables → Actions → **New repository variable**：
 
 - 名称 `CHANNEL`，值 `dingtalk`（钉钉）、`email`（邮件）、`feishu`、`serverchan`
-- 不配则默认 `email`
+- 不配则默认 `dingtalk`
 
 ### 4. 验证
 
@@ -72,6 +78,7 @@ python3 ai_daily_brief.py --no-wait            # 本地立即生成并推送（�
 | 邮件登录失败 | 用了登录密码而非 SMTP 授权码 | 去邮箱设置生成授权码 |
 | 一条都没收到 | `DEEPSEEK_API_KEY` 没配或余额不足 | Actions 日志会打印具体错误 |
 | 08:00 没收到但 Actions 有记录 | 发送渠道被拦截 | 看运行日志里的报错原文 |
+| 定时完全不触发（只有手动记录） | 私有仓库 + 免费账号，schedule 不注册 | 仓库改 Public，或升级 GitHub Pro；改完推送一次触发重新注册 |
 
 ## 五、文件说明
 
