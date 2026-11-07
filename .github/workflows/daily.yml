@@ -10,7 +10,12 @@ on:
   schedule:
     - cron: '50 23 * * *'   # 北京 07:50 → 08:00 发送（主）
     - cron: '20 0 * * *'    # 北京 08:20（兜底，已发过则跳过）
-  workflow_dispatch: {}      # 手动测试用；手动触发时跳过等待、立即推送
+  workflow_dispatch:
+    inputs:
+      skip_wait:
+        description: '立即发送（跳过等到 08:00）'
+        type: boolean
+        default: false
 
 permissions:
   contents: write            # 需要写回 digest_state.json 做当日去重
@@ -46,7 +51,9 @@ jobs:
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          # 外部定时器（cron-job.org / NAS）在 07:50 调 workflow_dispatch 时，这里同样等到 08:00 再发；
+          # 手动临时想立刻收到，就在 Run workflow 时勾选 skip_wait。
+          if [ "${{ inputs.skip_wait }}" = "true" ]; then
             python3 ai_daily_brief.py --no-wait
           else
             python3 ai_daily_brief.py --at 08:00
