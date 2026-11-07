@@ -91,3 +91,26 @@ python3 ai_daily_brief.py --no-wait            # 本地立即生成并推送（�
 |---|---|
 | `ai_daily_brief.py` | 主程序：抓取 → 去重 → 打分 → 限额 → 渲染 → 推送 |
 | `.github/workflows/daily.yml` | 定时配置（UTC 23:50 触发） |
+
+---
+
+## 六、外部触发（NAS，推荐，解决 GitHub cron 晚点）
+
+GitHub 的 `schedule` 实测会晚 3–5 小时，准点必须靠外部调度器在 07:50 调 `workflow_dispatch`。
+
+在群晖 NAS「控制面板 → 任务计划 → 用户定义的脚本」里建一个每天 07:50 的任务，运行：
+
+```bash
+/usr/bin/curl -sS -m 30 -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "Authorization: Bearer <GITHUB_PAT>" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  https://api.github.com/repos/lixiaoyi13/ai-daily-brief/actions/workflows/daily.yml/dispatches \
+  -d '{"ref":"main"}' \
+  -w "\nHTTP %{http_code} %{time_total}s\n" >> /volume1/homes/admin/ai-daily-brief.log 2>&1
+```
+
+- `HTTP 204` = 触发成功；`401` = PAT 过期；日志写在 `homes/admin/ai-daily-brief.log`（File Station 可见）。
+- PAT：classic token，勾 `public_repo` + `workflow` 两个 scope。
+- 工作流收到 dispatch 后同样等到 08:00 才发送；今天已发过则自动跳过（去重）。
+- GitHub 自己的 cron 保留兜底：NAS 没开机时仍会迟到补发。
