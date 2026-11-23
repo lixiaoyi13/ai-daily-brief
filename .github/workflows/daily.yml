@@ -16,6 +16,10 @@ on:
         description: '立即发送（跳过等到 08:00）'
         type: boolean
         default: false
+      dry_run:
+        description: '试运行：只把结果打印到日志，不推送、不写状态'
+        type: boolean
+        default: false
 
 permissions:
   contents: write            # 需要写回 digest_state.json 做当日去重
@@ -53,7 +57,9 @@ jobs:
         run: |
           # 外部定时器（cron-job.org / NAS）在 07:50 调 workflow_dispatch 时，这里同样等到 08:00 再发；
           # 手动临时想立刻收到，就在 Run workflow 时勾选 skip_wait。
-          if [ "${{ inputs.skip_wait }}" = "true" ]; then
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            python3 ai_daily_brief.py --no-wait --dry-run
+          elif [ "${{ inputs.skip_wait }}" = "true" ]; then
             python3 ai_daily_brief.py --no-wait
           else
             python3 ai_daily_brief.py --at 08:00

@@ -28,6 +28,7 @@ ai_daily_brief.py —— 每天北京时间 08:00 推送一份「AI 圈重大新
 
 import argparse
 import base64
+import difflib
 import gzip
 import hashlib
 import hmac
@@ -54,7 +55,10 @@ MAX_ITEMS = 5          # 每日条数上限
 MIN_SCORE = 4          # 重大事件门槛（0-5）
 PER_CATEGORY = 2       # 同一类别每天最多几条
 WINDOW_HOURS = 24      # 时间窗
-STATE_FILE = "digest_state.json"   # 记录「今天是否已推送」，用于第二次定时兜底时去重
+STATE_FILE = "digest_state.json"   # 今日已发标记 + 最近 RECENT_DAYS 天已发条目（跨天去重）
+RECENT_DAYS = 7        # 跨天去重记忆窗口（天）
+MAX_PER_SOURCE = 2     # 单一来源每天最多几条（防单源刷屏）
+NEAR_DUP_RATIO = 0.9   # 本地近似重复阈值（difflib 比对归一化标题）
 
 # ---------------------------------------------------------------------------
 # 源清单：tier 1 = 官方一手；tier 2 = 一线科技媒体；tier 3 = 聚合/研究（默认关闭）
@@ -88,7 +92,7 @@ CATEGORIES = ["模型发布", "融资并购", "监管政策", "安全事件", "�
 
 PROMPT = """你是资深 AI 行业编辑，负责给一位中国制造业技术负责人做每日简报。
 
-下面是过去 {hours} 小时的候选新闻（JSON 数组，字段：id/标题/来源/源等级/摘要）。
+下面是过去 {hours} 小时的候选新闻（JSON 数组，字段：id/标题/来源/源等级/时间/距今小时/摘要）。
 
 【只保留重大事件】命中以下任一即算重大，否则一律不要：
 1. 模型/产品：头部厂商（OpenAI、Anthropic、Google、Meta、xAI、DeepSeek、阿里、字节、月之暗面、智谱、Mistral、NVIDIA）发布新模型或重大版本，或核心产品能力/定价发生 ≥30% 变化。
@@ -100,14 +104,17 @@ PROMPT = """你是资深 AI 行业编辑，负责给一位中国制造业技术�
 
 【明确排除】教程与 How-to、Prompt 技巧、观点评论/预测、非官方测评榜单、例行版本更新（bugfix/小版本）、招聘、活动预告、纯股价波动、无原始出处的二手搬运、软文。
 
+【时效】只保留发布时间在 {hours} 小时以内的条目：「距今小时」大于 {hours} 或「时间」为空的条目一律不要（旧闻、来路不明的一律不要，宁可少发）。
+
 【打分】每条 0-5 分，综合考虑：是否真的重大（0-2）、是否一手/首发（0-2）、是否可验证（0-1）。只输出 score >= {min_score} 的条目。
 
 【限额】最多 {max_items} 条；同一 category 最多 {per_cat} 条；同一事件被多家报道时只保留一条，优先 tier 1 来源。宁缺毋滥，没有达标事件就返回空数组。
 
 【输出】严格输出 JSON，不要任何解释文字：
-{{"items":[{{"id":<候选id>,"score":<0-5>,"category":"模型发布|融资并购|监管政策|安全事件|算力芯片|组织变动","title":"中文标题，不超过40字","one_line":"一句话要点，不超过60字，必须含 主体+做了什么+影响","why":"入选理由，不超过30字"}}]}}
+{{"items":[{{"id":<候选id>,"score":<0-5>,"category":"模型发布|融资并购|监管政策|安全事件|算力芯片|组织变动","event_key":"同一事件的统一标识，小写英文或拼音，形如 anthropic-ipo","title":"中文标题，不超过40字","one_line":"一句话要点，不超过60字，必须含 主体+做了什么+影响","why":"入选理由，不超过30字"}}]}}
 
-硬性约束：id 必须来自候选列表；禁止编造新闻；禁止输出候选之外的链接。"""
+硬性约束：id 必须来自候选列表；禁止编造新闻；禁止输出候选之外的链接。
+多条候选讲同一件事时只输出一条，且同一事件必须用同一个 event_key；不同事件禁止复用 event_key。"""
 
 
 # ---------------------------------------------------------------------------
@@ -121,20 +128,78 @@ def today_str():
     return "%s %s" % (now.strftime("%Y-%m-%d"), WEEK[now.weekday()])
 
 
-def already_sent_today():
+def _state_cutoff():
+    return (datetime.now(CST) - timedelta(days=RECENT_DAYS)).strftime("%Y-%m-%d")
+
+
+def load_state():
     try:
         with open(STATE_FILE, encoding="utf-8") as f:
-            return json.load(f).get("last_sent") == today_str()[:10]
+            st = json.load(f)
+        return st if isinstance(st, dict) else {}
     except Exception:
-        return False
+        return {}
 
 
-def mark_sent():
+def already_sent_today():
+    return load_state().get("last_sent") == today_str()[:10]
+
+
+def title_key(title):
+    nt = norm_title(title)
+    return hashlib.sha1(nt.encode("utf-8")).hexdigest()[:16] if nt else ""
+
+
+def link_key(link):
+    nl = norm_link(link)
+    return hashlib.sha1(nl.encode("utf-8")).hexdigest()[:16] if nl else ""
+
+
+def item_keys(link, title):
+    """一条新闻的稳定指纹集合：链接指纹 + 标题指纹。
+
+    链接指纹认同一篇稿子；标题指纹兜底同一篇稿子换了 URL 参数/域名的情况。
+    """
+    return {k for k in (link_key(link), title_key(title)) if k}
+
+
+def recent_keys():
+    """最近 RECENT_DAYS 天已推送过的条目指纹（跨天去重用）。"""
+    cutoff = _state_cutoff()
+    keys = set()
+    for rec in load_state().get("recent") or []:
+        if not isinstance(rec, dict) or (rec.get("date") or "") < cutoff:
+            continue
+        for k in (rec.get("key"), rec.get("tk")):
+            if k:
+                keys.add(k)
+    return keys
+
+
+def mark_sent(rows=()):
+    """写状态：今天已发 + 本次推送条目的指纹（供未来 RECENT_DAYS 天去重）。"""
+    st = load_state()
+    cutoff = _state_cutoff()
+    recent = [r for r in (st.get("recent") or [])
+              if isinstance(r, dict) and (r.get("date") or "") >= cutoff]
+    seen = {r.get("key") for r in recent} | {r.get("tk") for r in recent}
+    for row in rows or ():
+        src_title = row.get("src_title") or row.get("title") or ""
+        ks = item_keys(row.get("link"), src_title)
+        if not ks or ks & seen:
+            continue
+        seen |= ks
+        recent.append({"date": today_str()[:10],
+                       "key": link_key(row.get("link")),
+                       "tk": title_key(src_title),
+                       "title": src_title[:40]})
+    recent = recent[-400:]
     try:
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             json.dump({"last_sent": today_str()[:10],
-                       "sent_at": datetime.now(CST).strftime("%Y-%m-%d %H:%M:%S")},
-                      f, ensure_ascii=False)
+                       "sent_at": datetime.now(CST).strftime("%Y-%m-%d %H:%M:%S"),
+                       "recent": recent},
+                      f, ensure_ascii=False, indent=1)
     except Exception as e:  # noqa: BLE001
         log("写状态文件失败（不影响已发送）：%s" % e)
 
@@ -157,10 +222,30 @@ def norm_title(s):
     return re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", (s or "").lower())
 
 
+_TRACKING_EXACT = {"f", "from", "ref", "source", "spm", "share", "wfr", "ocid",
+                   "ixid", "src", "chn", "utm", "rss"}
+_TRACKING_PREFIX = ("utm_", "share_")
+
+
+def _is_tracking(name):
+    name = name.lower()
+    return name in _TRACKING_EXACT or name.startswith(_TRACKING_PREFIX)
+
+
 def norm_link(u):
+    """去掉锚点与常见追踪参数，让同一篇文章两次抓取得到同一个指纹。"""
     u = (u or "").split("#")[0]
-    u = re.sub(r"[?&](utm_[^&]*|ref|source|spm)=[^&]*", "", u)
-    return u.rstrip("/")
+    base, sep, query = u.partition("?")
+    if not sep:
+        return base.rstrip("/")
+    kept = []
+    for pair in query.split("&"):
+        if pair and not _is_tracking(pair.split("=", 1)[0]):
+            kept.append(pair)
+    return (base + ("?" + "&".join(kept) if kept else "")).rstrip("/")
+
+
+_DT_FALLBACK = re.compile(r"^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})\s*([+-]\d{2}:?\d{2})?$")
 
 
 def parse_dt(text):
@@ -181,7 +266,30 @@ def parse_dt(text):
             dt = dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(CST)
     except Exception:
+        pass
+    return _parse_dt_fallback(text)
+
+
+def _parse_dt_fallback(text):
+    """兜底解析 "2026-11-20 17:14:53  +0800" 这类非标准时间（36氪等中文源在用）。
+
+    RFC822（parsedate_to_datetime）与 fromisoformat 都不接受「双空格 + 空格分隔时区」的写法；
+    解析失败会让条目变成「无时间」，在 24 小时窗口里永远算新鲜——2026-11-20 的旧闻
+    因此连推了三天（2026-11-23 修复）。
+    """
+    m = _DT_FALLBACK.match(re.sub(r"\s+", " ", text))
+    if not m:
         return None
+    date_s, time_s, off = m.groups()
+    try:
+        naive = datetime.strptime("%s %s" % (date_s, time_s), "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    if not off:
+        return naive.replace(tzinfo=CST)
+    sign = 1 if off[0] == "+" else -1
+    tz = timezone(sign * timedelta(hours=int(off[1:3]), minutes=int(off[-2:])))
+    return naive.replace(tzinfo=tz).astimezone(CST)
 
 
 def tag_local(el):
@@ -261,8 +369,14 @@ def collect(feeds, window_hours):
             raw = http_get(f["url"], timeout=f.get("timeout", 20), retries=f.get("retries", 2))
             parsed = parse_feed(raw)
             fresh = 0
+            undated = 0
             for title, link, summary, pub in parsed:
-                if pub and pub < since:
+                if pub is None:
+                    # 拿不到发布时间就丢弃：以前是「保留」，等于让格式异常的源
+                    # 把整份历史归档当新鲜新闻（36氪 RSS 就踩过这个坑）。
+                    undated += 1
+                    continue
+                if pub < since:
                     continue
                 nt, nl = norm_title(title), norm_link(link)
                 if not nt or nt in seen_title or (nl and nl in seen_link):
@@ -274,13 +388,15 @@ def collect(feeds, window_hours):
                     "title": title[:180],
                     "link": link,
                     "summary": summary[:300],
-                    "published": pub.strftime("%m-%d %H:%M") if pub else "",
+                    "published": pub.strftime("%m-%d %H:%M"),
+                    "age_hours": round((now - pub).total_seconds() / 3600.0, 1),
                     "source": f["name"],
                     "tier": f["tier"],
                     "lang": f["lang"],
                 })
                 fresh += 1
-            log("OK   %-22s 解析 %3d 条，24h 内 %3d 条" % (f["name"], len(parsed), fresh))
+            note = "，丢弃无发布时间 %d 条" % undated if undated else ""
+            log("OK   %-22s 解析 %3d 条，24h 内 %3d 条%s" % (f["name"], len(parsed), fresh, note))
         except Exception as e:  # noqa: BLE001
             errors.append("%s: %s" % (f["name"], e))
             log("FAIL %-22s %s" % (f["name"], e))
@@ -342,9 +458,23 @@ def call_deepseek(candidates, api_key, model):
     return json.loads(content)
 
 
+def _near_dup(title, existing):
+    """归一化标题的近似重复判断（不同媒体同一事件常常只差几个字）。"""
+    nt = norm_title(title)
+    if not nt:
+        return False
+    for other in existing:
+        if other and difflib.SequenceMatcher(None, nt, other).ratio() >= NEAR_DUP_RATIO:
+            return True
+    return False
+
+
 def select(picked, candidates, items):
-    """把模型返回的 id 映射回本地候选，强制限额与去重。"""
-    rows, seen_cat, seen_key = [], {}, set()
+    """把模型返回的 id 映射回本地候选，强制限额与去重。
+
+    四道闸：同链接/同标题（含近似）→ 同 event_key → 同类别限 2 条 → 同来源限 2 条。
+    """
+    rows, seen_cat, seen_title, seen_event, seen_src = [], {}, [], set(), {}
     for it in sorted(picked.get("items", []), key=lambda x: -float(x.get("score", 0))):
         try:
             idx = int(it["id"])
@@ -356,17 +486,28 @@ def select(picked, candidates, items):
         cat = it.get("category") if it.get("category") in CATEGORIES else "模型发布"
         if seen_cat.get(cat, 0) >= PER_CATEGORY:
             continue
-        key = norm_title(it.get("title") or c["title"])[:30]
-        if key in seen_key:
+        src = c["source"]
+        if seen_src.get(src, 0) >= MAX_PER_SOURCE:
             continue
-        seen_key.add(key)
+        ek = re.sub(r"[^0-9a-z]+", "", (it.get("event_key") or "").lower())
+        if ek and ek in seen_event:
+            continue
+        title = (it.get("title") or c["title"])[:60]
+        if _near_dup(title, seen_title) or _near_dup(c["title"], seen_title):
+            continue
+        seen_title.extend([norm_title(title), norm_title(c["title"])])
+        if ek:
+            seen_event.add(ek)
         seen_cat[cat] = seen_cat.get(cat, 0) + 1
+        seen_src[src] = seen_src.get(src, 0) + 1
         rows.append({
             "category": cat,
-            "title": (it.get("title") or c["title"])[:60],
+            "title": title,
             "one_line": (it.get("one_line") or "")[:90],
             "why": (it.get("why") or "")[:40],
+            "event_key": ek,
             "source": c["source"],
+            "src_title": c["title"],     # 源站原标题，用作跨天去重指纹
             "link": c["link"],            # 链接只来自本地候选，模型无法伪造
             "tier": c["tier"],
         })
@@ -594,6 +735,14 @@ def main():
         for attempt in range(1, args.retries + 1):
             try:
                 items, errors = collect(FEEDS, WINDOW_HOURS)
+                sent_before = recent_keys()
+                if sent_before:
+                    kept = [it for it in items
+                            if not (item_keys(it["link"], it["title"]) & sent_before)]
+                    if len(kept) != len(items):
+                        log("跨天去重：最近 %d 天已推送过，过滤掉 %d 条"
+                            % (RECENT_DAYS, len(items) - len(kept)))
+                    items = kept
                 log("候选合计 %d 条，源错误 %d 个（第 %d/%d 次）"
                     % (len(items), len(errors), attempt, args.retries))
                 if not items:
@@ -604,6 +753,7 @@ def main():
                     "来源": it["source"],
                     "源等级": "T%d" % it["tier"],
                     "时间": it["published"],
+                    "距今小时": it["age_hours"],
                     "摘要": it["summary"],
                 } for i, it in enumerate(items)]
                 if args.fake_llm:
@@ -631,7 +781,7 @@ def main():
             return
         log("本次推送内容：\n" + text)   # 写进 Actions 日志，方便事后核对
         dispatch(subject, text, html_body, args.channel)
-        mark_sent()
+        mark_sent(rows)
         log("完成")
     except Exception as e:  # noqa: BLE001
         log("运行失败：%s" % e)
