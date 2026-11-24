@@ -1,6 +1,6 @@
 {
- "last_sent": "2026-11-23",
- "sent_at": "2026-11-23 08:00:15",
+ "last_sent": "2026-11-24",
+ "sent_at": "2026-11-24 08:00:12",
  "recent": [
   {
    "date": "2026-11-20",
@@ -79,6 +79,18 @@
    "key": "ebc78187e53193b8",
    "tk": "0ef999a4fd8a6164",
    "title": "OpenAI首席科学家提议限制模型开发，Altman公开赞同"
+  },
+  {
+   "date": "2026-11-24",
+   "key": "43b498f2b7e3dbe0",
+   "tk": "265ff41db0569935",
+   "title": "Anthropic launches Claude Ship, letting "
+  },
+  {
+   "date": "2026-11-24",
+   "key": "f955d48edeaa52ba",
+   "tk": "30e73e509908a95d",
+   "title": "Amazon snaps up Decart’s AI optimization"
   }
  ]
 }
