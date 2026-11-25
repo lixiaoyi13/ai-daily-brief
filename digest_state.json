@@ -1,6 +1,6 @@
 {
- "last_sent": "2026-11-24",
- "sent_at": "2026-11-24 08:00:12",
+ "last_sent": "2026-11-25",
+ "sent_at": "2026-11-25 08:00:11",
  "recent": [
   {
    "date": "2026-11-20",
@@ -91,6 +91,24 @@
    "key": "f955d48edeaa52ba",
    "tk": "30e73e509908a95d",
    "title": "Amazon snaps up Decart’s AI optimization"
+  },
+  {
+   "date": "2026-11-25",
+   "key": "3c6728c1bfd19879",
+   "tk": "997aa7d301e27622",
+   "title": "GPT-6 models demonstrate intrinsic prote"
+  },
+  {
+   "date": "2026-11-25",
+   "key": "5845ed4863b49265",
+   "tk": "41db9ac188fd46c6",
+   "title": "Amazon’s Decart acquisition is a bet on "
+  },
+  {
+   "date": "2026-11-25",
+   "key": "e5443a2519486806",
+   "tk": "0556bca001f43936",
+   "title": "文心 5.5 Flash Preview正式开源，采用 Apache 2.0 协"
   }
  ]
 }
