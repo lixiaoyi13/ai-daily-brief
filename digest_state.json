@@ -1,6 +1,6 @@
 {
- "last_sent": "2026-11-25",
- "sent_at": "2026-11-25 08:00:11",
+ "last_sent": "2026-11-26",
+ "sent_at": "2026-11-26 08:00:08",
  "recent": [
   {
    "date": "2026-11-20",
@@ -109,6 +109,30 @@
    "key": "e5443a2519486806",
    "tk": "0556bca001f43936",
    "title": "文心 5.5 Flash Preview正式开源，采用 Apache 2.0 协"
+  },
+  {
+   "date": "2026-11-26",
+   "key": "c711f0a614eeec08",
+   "tk": "27ea4ce902771120",
+   "title": "两大AI公司同日公布“VP≠VNP”问题证明"
+  },
+  {
+   "date": "2026-11-26",
+   "key": "9f04dc5d99354d6f",
+   "tk": "fb355162ae4fe20f",
+   "title": "SpaceX被曝下调Blackwell芯片租金最高约35%，并低价转租Anthr"
+  },
+  {
+   "date": "2026-11-26",
+   "key": "c2211ba4f6cde58c",
+   "tk": "01fa1def74b2880b",
+   "title": "Want to buy your kid an AI toy this Chri"
+  },
+  {
+   "date": "2026-11-26",
+   "key": "92419877312e3e17",
+   "tk": "b575eb82b86bd73c",
+   "title": "Character.AI’s plan to auction off users"
   }
  ]
 }
