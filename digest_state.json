@@ -1,6 +1,6 @@
 {
- "last_sent": "2026-11-26",
- "sent_at": "2026-11-26 08:00:08",
+ "last_sent": "2026-11-27",
+ "sent_at": "2026-11-27 08:00:10",
  "recent": [
   {
    "date": "2026-11-20",
@@ -133,6 +133,12 @@
    "key": "92419877312e3e17",
    "tk": "b575eb82b86bd73c",
    "title": "Character.AI’s plan to auction off users"
+  },
+  {
+   "date": "2026-11-27",
+   "key": "c881f1e7111092b0",
+   "tk": "9f5ff84d82c09ae1",
+   "title": "Nvidia hits pause on chip shipments to S"
   }
  ]
 }
